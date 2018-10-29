@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+import argparse
+import os
+
+
+parser = argparse.ArgumentParser(description='This is a python version of rsync.')
+parser.add_argument('SRC')
+parser.add_argument('DEST')
+args = parser.parse_args()
+
+
+def exist(file_name):
+    return os.path.exists(file_name)
+
+
+def isDir(file_name):
+    return os.path.isdir(file_name)
+
+
+def isFile(file_name):
+    return os.path.isfile(file_name)
+
+
+def copyFile(SRC, DEST, dest_path=None):
+    # Source section:
+    src_path = os.path.realpath(SRC)
+    src_info = os.stat(src_path)
+    src_fd = os.open(src_path, os.O_RDONLY)
+    src_content = os.read(src_fd, src_info.st_size)
+    # Destination section:
+    if dest_path == None:
+        dest_path = os.path.realpath(DEST)
+    else:
+        dest_path = os.path.join(dest_path, DEST)
+    dest_fd = os.open(dest_path, os.O_CREAT | os.O_WRONLY)
+    # Write content from Source to Destination:
+    os.write(dest_fd, src_content)
+    # Change access time, modified time and mode of Destination = Source:
+    os.utime(dest_fd, (src_info.st_atime, src_info.st_mtime))
+    os.chmod(dest_fd, src_info.st_mode)
+    # Close all:
+    os.close(src_fd)
+    os.close(dest_fd)
+
+if __name__ == '__main__':
+    if exist(args.SRC):
+        pass
+    else:
+        print('Source: No such filed or directory.')
+
+    if exist(args.DEST):
+        if isFile(args.DEST):
+            pass
+        elif isDir(args.DEST):
+            copyFile(args.SRC, args.SRC, args.DEST)
+    else:
+        copyFile(args.SRC, args.DEST)
