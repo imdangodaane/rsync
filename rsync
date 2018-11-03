@@ -26,10 +26,10 @@ def copyFile(SRC, DEST, dest_path=None):
     src_fd = os.open(src_path, os.O_RDONLY)
     src_content = os.read(src_fd, src_info.st_size)
     # Destination section:
-    if dest_path == None:
+    if dest_path is None:
         dest_path = os.path.realpath(DEST)
     else:
-        dest_path = os.path.join(dest_path, DEST)
+        dest_path = os.path.join(dest_path, SRC)
     dest_fd = os.open(dest_path, os.O_CREAT | os.O_WRONLY)
     # Write content from Source to Destination:
     os.write(dest_fd, src_content)
@@ -41,70 +41,80 @@ def copyFile(SRC, DEST, dest_path=None):
     os.close(dest_fd)
 
 
+def needUpdate(SRC, DEST):
+    if os.stat(SRC).st_mtime > os.stat(DEST).st_mtime:
+        return os.stat(SRC).st_size != os.stat(DEST).st_size
+
+
 def updateFile(SRC, DEST, dest_path=None):
-    pass
-def copyFile():
-    pass
-def copyLink():
-    pass
-def copyAllFiles():
+    if needUpdate(SRC, DEST):
+        src_fd = os.open(SRC, os.O_RDONLY)
+        src_content = os.read(src_fd, os.stat(SRC).st_size)
+        dest_fd = os.open(DEST, os.O_RDWR)
+        dest_content = os.read(dest_fd, os.stat(DEST).st_size)
+        
+
+
+
+def copyLink(SRC, DEST):
+    src_path = os.path.realpath(os.readlink(SRC))
+    dest_path = os.path.join(os.path.realpath(DEST), SRC)
+    os.symlink(src_path, dest_path)
+
+
+def copyAllFilesInDir():
     pass
 
+
+def copyFolder():
+    pass
+
+
+def updateSymlink():
+    pass
+
+
+def file_symlink(SRC, DEST):
+    os.unlink(DEST)
+    copyFile(SRC, DEST)
+
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='This is a python version of rsync.')
+    parser = argparse.ArgumentParser(description='This is a python version \
+    of rsync.')
     parser.add_argument('SRC')
     parser.add_argument('DEST')
     args = parser.parse_args()
 
     if exist(args.SRC) and not exist(args.DEST):
         if isFile(args.SRC):
-            copyFile()
+            copyFile(args.SRC, args.DEST)
         elif isDir(args.SRC):
-            copyFile()
+            copyFile(args.SRC, args.DEST, os.path.realpath(args.DEST))
         elif isSymlink(args.SRC):
-            copyLink()
+            copyLink(args.SRC, args.DEST)
     elif exist(args.SRC) and exist(args.DEST):
-        if isFile(args.SRC):
-            if isFile(args.DEST):
-                updateFile()
+        if isSymlink(args.SRC):
+            if isSymlink(args.DEST):
+                print('skipping non-regular file "%s"' % (args.SRC))
+            elif isFile(args.DEST):
+                print('skipping non-regular file "%s"' % (args.SRC))
             elif isDir(args.DEST):
-                copyFile()
-            elif isSymlink(args.DEST):
-                raise IOError('Unable sync file to a symlink.')
-        if isDir(args.SRC):
+                copyLink(args.SRC, args.DEST)
+        elif isFile(args.SRC):
+            if isSymlink(args.DEST):
+                file_symlink(args.SRC, args.DEST)
+            elif isFile(args.DEST):
+                updateFile(args.SRC, args.DEST)
+            elif isDir(args.DEST):
+                copyFile(args.SRC, args.DEST, os.path.realpath(args.DEST))
+        elif isDir(args.SRC):
             if isFile(args.DEST):
-                raise IOError('Unable sync directory to a file.')
+                raise IOError('Unable sync directory to file.')
             elif isDir(args.DEST):
                 if args.SRC[-1] == '/':
                     copyAllFilesInDir()
                 else:
                     copyFolder()
             elif isSymlink(args.DEST):
-                raise IOError('Unable sync directory to a symlink.')
-        if isSymlink(args.SRC):
-            if isFile(args.DEST):
-                raise IOError('Unable sync symlink to a file.')
-            elif isDir(args.DEST):
-                copyLink()
-            elif isSymlink(args.DEST):
-                raise IOError('Unable sync symlink to a symlink.')
-
-
-
-    # if exist(args.SRC):
-    #     if isFile(args.SRC):
-    #         pass
-    #     elif isDir(args.SRC):
-    #         pass
-    #     elif isSymlink(args.SRC):
-    #         pass
-    # else:
-    #     print('Source: No such filed or directory.')
-    #
-    # if exist(args.DEST):
-    #     if isFile(args.DEST):
-    #         pass
-    #     elif isDir(args.DEST):
-    #         copyFile(args.SRC, args.SRC, args.DEST)
-    # else:
-    #     copyFile(args.SRC, args.DEST)
+                raise IOError('Unable sync directory to symlink.')
