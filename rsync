@@ -19,6 +19,10 @@ def isSymlink(file_name):
     return os.path.islink(file_name)
 
 
+def isHardlink(file_name):
+    return (os.stat(file_name).st_nlink > 1)
+
+
 def copyFile(SRC, DEST, dest_path=None):
     # Source section:
     src_path = os.path.realpath(SRC)
@@ -29,7 +33,7 @@ def copyFile(SRC, DEST, dest_path=None):
     if dest_path is None:
         dest_path = os.path.realpath(DEST)
     else:
-        dest_path = os.path.join(dest_path, SRC)
+        dest_path = os.path.join(dest_path, os.path.basename(SRC))
     dest_fd = os.open(dest_path, os.O_CREAT | os.O_WRONLY)
     # Write content from Source to Destination:
     os.write(dest_fd, src_content)
@@ -42,24 +46,58 @@ def copyFile(SRC, DEST, dest_path=None):
 
 
 def needUpdate(SRC, DEST):
-    if os.stat(SRC).st_mtime > os.stat(DEST).st_mtime:
-        return os.stat(SRC).st_size != os.stat(DEST).st_size
+    if args.update:
+        if os.stat(SRC).st_mtime < os.stat(DEST).st_mtime:
+            return
+    if args.checksum:
+        return 'checksum'
+    if os.stat(SRC).st_mtime != os.stat(DEST).st_mtime:
+        if os.stat(SRC).st_size < os.stat(DEST).st_size:
+            return 'copy'
+        elif os.stat(SRC).st_size > os.stat(DEST).st_size:
+            return 'update'
 
 
 def updateFile(SRC, DEST, dest_path=None):
-    if needUpdate(SRC, DEST):
+    if needUpdate(SRC, DEST) == 'update' or \
+       needUpdate(SRC, DEST) == 'checksum':
         src_fd = os.open(SRC, os.O_RDONLY)
         src_content = os.read(src_fd, os.stat(SRC).st_size)
         dest_fd = os.open(DEST, os.O_RDWR)
         dest_content = os.read(dest_fd, os.stat(DEST).st_size)
-        
+        count = 0
+        while count < os.stat(SRC).st_size:
+            os.lseek(src_fd, count, 0)
+            os.lseek(dest_fd, count, 0)
+            if count < os.stat(DEST).st_size:
+                if src_content[count] != dest_content[count]:
+                    os.sendfile(dest_fd, src_fd, count, 1)
+            else:
+                os.sendfile(dest_fd, src_fd, count, 1)
+            count += 1
+    elif needUpdate(SRC, DEST) == 'copy':
+        os.unlink(DEST)
+        copyFile(SRC, DEST)
 
 
-
-def copyLink(SRC, DEST):
-    src_path = os.path.realpath(os.readlink(SRC))
-    dest_path = os.path.join(os.path.realpath(DEST), SRC)
+def copyLink(SRC, DEST, dest_path=None):
+    # src_path = os.path.realpath(os.readlink(SRC))
+    src_path = os.path.relpath(os.readlink(SRC))
+    if dest_path is None:
+        dest_path = os.path.relpath(DEST)
+    else:
+        dest_path = os.path.join(os.path.relpath(DEST), os.path.basename(SRC))
     os.symlink(src_path, dest_path)
+
+
+def copyHardlink(SRC, DEST, dest_path=None):
+    if dest_path:
+        DEST = os.path.join(os.path.relpath(DEST), os.path.basename(SRC))
+    try:
+        os.unlink(DEST)
+        os.link(SRC, DEST)
+    except FileNotFoundError:
+        os.link(SRC, DEST)
 
 
 def copyAllFilesInDir():
@@ -82,25 +120,42 @@ def file_symlink(SRC, DEST):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='This is a python version \
     of rsync.')
-    parser.add_argument('SRC')
-    parser.add_argument('DEST')
+    parser.add_argument('SRC', action='store')
+    parser.add_argument('DEST', action='store')
+    parser.add_argument('-u', '--update', action='store_true')
+    parser.add_argument('-c', '--checksum', action='store_true')
     args = parser.parse_args()
 
+    if not exist(args.SRC):
+        print('rsync: link_stat "%s" failed: No such file or directory (2)'
+              % os.path.realpath(args.SRC))
+    if not os.access(args.SRC, os.R_OK):
+        print('rsync: send_files failed to open "%s": Permission denied (13)'
+              % os.path.realpath(args.SRC))
     if exist(args.SRC) and not exist(args.DEST):
-        if isFile(args.SRC):
+        if isHardlink(args.SRC):
+            copyHardlink(args.SRC, args.DEST)
+        if isSymlink(args.SRC):
+            copyLink(args.SRC, args.DEST)
+        elif isFile(args.SRC):
             copyFile(args.SRC, args.DEST)
         elif isDir(args.SRC):
             copyFile(args.SRC, args.DEST, os.path.realpath(args.DEST))
-        elif isSymlink(args.SRC):
-            copyLink(args.SRC, args.DEST)
     elif exist(args.SRC) and exist(args.DEST):
+        if isHardlink(args.SRC):
+            if isSymlink(args.DEST):
+                copyHardlink(args.SRC, args.DEST)
+            elif isFile(args.DEST):
+                copyHardlink(args.SRC, args.DEST)
+            elif isDir(args.DEST):
+                copyHardlink(args.SRC, args.DEST, os.path.realpath(args.DEST))
         if isSymlink(args.SRC):
             if isSymlink(args.DEST):
                 print('skipping non-regular file "%s"' % (args.SRC))
             elif isFile(args.DEST):
                 print('skipping non-regular file "%s"' % (args.SRC))
             elif isDir(args.DEST):
-                copyLink(args.SRC, args.DEST)
+                copyLink(args.SRC, args.DEST, os.path.realpath(args.DEST))
         elif isFile(args.SRC):
             if isSymlink(args.DEST):
                 file_symlink(args.SRC, args.DEST)
